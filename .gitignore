@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Sessions output (contains personal interview data — never commit)
+sessions/
+
+# Whisper model cache (downloaded at runtime, ~140 MB)
+# Windows: %USERPROFILE%\.cache\huggingface\
+# Excluded here as a reminder; actual cache is outside repo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

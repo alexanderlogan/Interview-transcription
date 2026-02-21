@@ -1,0 +1,9 @@
+# Audio capture — WASAPI loopback + input device support
+PyAudioWPatch>=0.2.12
+
+# Transcription — CPU-optimized Whisper (Phase 2+, included now to lock version)
+faster-whisper>=1.0.0
+
+# Audio processing
+numpy>=1.24.0
+soxr>=0.3.0
