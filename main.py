@@ -22,33 +22,19 @@ from src.audio.capture import LoopbackCaptureThread, MicrophoneCaptureThread
 from src.output.session import SessionWriter
 from config import WHISPER_SAMPLE_RATE
 
-# ---------------------------------------------------------------------------
-# Logging configuration
-# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(threadName)s] %(levelname)s — %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Phase 1: Capture verification drain loop
-# ---------------------------------------------------------------------------
-
-def drain_queue(
-    capture_queue: queue.Queue,
-    label: str,
-    stop_event: threading.Event,
-) -> None:
+def drain_queue(capture_queue: queue.Queue, label: str, stop_event: threading.Event) -> None:
     """
     Consumer thread (Phase 1 only).
     Pulls audio chunks from the queue and logs receipt.
-    Confirms that audio is flowing without invoking Whisper.
     Will be replaced by WhisperTranscriptionThread in Phase 2.
     """
     chunk_count = 0
@@ -59,19 +45,12 @@ def drain_queue(
             duration = len(audio) / WHISPER_SAMPLE_RATE
             logger.info(
                 "[%s] Chunk %d received — %.2f s of audio (%.0f samples)",
-                label,
-                chunk_count,
-                duration,
-                len(audio),
+                label, chunk_count, duration, len(audio),
             )
         except queue.Empty:
             continue
     logger.info("[%s] Drain thread exiting after %d chunks.", label, chunk_count)
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     logger.info("=" * 60)
@@ -81,29 +60,26 @@ def main() -> None:
 
     stop_event = threading.Event()
 
-    # Queues
     loopback_queue: queue.Queue = queue.Queue()
     mic_queue: queue.Queue = queue.Queue()
 
-    # Capture threads
     loopback_thread = LoopbackCaptureThread(loopback_queue, stop_event)
     mic_thread = MicrophoneCaptureThread(mic_queue, stop_event)
 
-    # Start capture
+    # Stagger thread starts to avoid concurrent PyAudio initialisation collision
     loopback_thread.start()
+    time.sleep(1.0)
     mic_thread.start()
 
-    # Brief pause to allow device detection to complete before reading device names
-    time.sleep(1.5)
+    # Allow both threads to complete device detection before reading device names
+    time.sleep(2.0)
 
-    # Initialise session file
     session = SessionWriter(
         loopback_device_name=loopback_thread.device_name,
         mic_device_name=mic_thread.device_name,
     )
     logger.info("Session file: %s", session.filepath)
 
-    # Phase 1 drain threads (replaced by Whisper in Phase 2)
     loopback_drain = threading.Thread(
         target=drain_queue,
         args=(loopback_queue, "Loopback", stop_event),
@@ -119,14 +95,12 @@ def main() -> None:
     loopback_drain.start()
     mic_drain.start()
 
-    # Run until Ctrl+C
     try:
         while True:
             time.sleep(0.5)
     except KeyboardInterrupt:
         logger.info("Shutdown signal received.")
 
-    # Graceful shutdown
     stop_event.set()
     loopback_thread.join(timeout=5)
     mic_thread.join(timeout=5)
