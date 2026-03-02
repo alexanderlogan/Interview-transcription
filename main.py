@@ -2,25 +2,24 @@
 #
 # Interview Transcriber — Entry Point
 #
-# Phase 1 behaviour:
-#   - Starts loopback capture thread (system audio / interviewer)
-#   - Starts microphone capture thread (user)
-#   - Initialises session JSON file with device metadata
-#   - Drains both capture queues and logs chunk receipt to confirm audio flow
-#   - Runs until Ctrl+C
-#   - Closes session file cleanly on exit
-#
-# Phase 2 will replace the queue-drain loop with Whisper transcription threads.
+# Phase 2 behaviour:
+#   - Single loopback stream captures all audio (interviewer + user)
+#   - Whisper base model transcribes each 5-second chunk
+#   - Silent chunks are discarded before reaching Whisper
+#   - Results written to structured JSON session file in real time
+#   - Speaker label is placeholder "Speaker" until Phase 3 diarization
+#   - Runs until Ctrl+C, closes session cleanly on exit
 
 import queue
-import threading
 import logging
 import sys
 import time
 
-from src.audio.capture import LoopbackCaptureThread, MicrophoneCaptureThread
+from src.audio.capture import LoopbackCaptureThread
+from src.transcription.whisper_engine import WhisperEngine
+from src.pipeline import TranscriptionThread
 from src.output.session import SessionWriter
-from config import WHISPER_SAMPLE_RATE
+import threading
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,79 +30,53 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def drain_queue(capture_queue: queue.Queue, label: str, stop_event: threading.Event) -> None:
-    """
-    Consumer thread (Phase 1 only).
-    Pulls audio chunks from the queue and logs receipt.
-    Will be replaced by WhisperTranscriptionThread in Phase 2.
-    """
-    chunk_count = 0
-    while not stop_event.is_set():
-        try:
-            audio = capture_queue.get(timeout=1.0)
-            chunk_count += 1
-            duration = len(audio) / WHISPER_SAMPLE_RATE
-            logger.info(
-                "[%s] Chunk %d received — %.2f s of audio (%.0f samples)",
-                label, chunk_count, duration, len(audio),
-            )
-        except queue.Empty:
-            continue
-    logger.info("[%s] Drain thread exiting after %d chunks.", label, chunk_count)
-
-
 def main() -> None:
     logger.info("=" * 60)
-    logger.info("Interview Transcriber — Phase 1 Capture Verification")
+    logger.info("Interview Transcriber — Phase 2 Transcription")
     logger.info("=" * 60)
     logger.info("Press Ctrl+C to stop.")
 
     stop_event = threading.Event()
-
     loopback_queue: queue.Queue = queue.Queue()
-    mic_queue: queue.Queue = queue.Queue()
 
+    # Load Whisper model before starting capture
+    whisper = WhisperEngine()
+    whisper.load()
+
+    # Start loopback capture
     loopback_thread = LoopbackCaptureThread(loopback_queue, stop_event)
-    mic_thread = MicrophoneCaptureThread(mic_queue, stop_event)
-
-    # Stagger thread starts to avoid concurrent PyAudio initialisation collision
     loopback_thread.start()
-    time.sleep(1.0)
-    mic_thread.start()
 
-    # Allow both threads to complete device detection before reading device names
+    # Allow device detection to complete before reading device name
     time.sleep(2.0)
 
+    # Initialise session file
     session = SessionWriter(
         loopback_device_name=loopback_thread.device_name,
-        mic_device_name=mic_thread.device_name,
+        mic_device_name="n/a",
     )
     logger.info("Session file: %s", session.filepath)
 
-    loopback_drain = threading.Thread(
-        target=drain_queue,
-        args=(loopback_queue, "Loopback", stop_event),
-        name="LoopbackDrain",
-        daemon=True,
+    # Start transcription thread
+    transcription_thread = TranscriptionThread(
+        audio_queue=loopback_queue,
+        whisper=whisper,
+        session=session,
+        stop_event=stop_event,
     )
-    mic_drain = threading.Thread(
-        target=drain_queue,
-        args=(mic_queue, "Microphone", stop_event),
-        name="MicDrain",
-        daemon=True,
-    )
-    loopback_drain.start()
-    mic_drain.start()
+    transcription_thread.start()
 
+    # Run until Ctrl+C
     try:
         while True:
             time.sleep(0.5)
     except KeyboardInterrupt:
         logger.info("Shutdown signal received.")
 
+    # Graceful shutdown — signal stop, wait for queue to drain
     stop_event.set()
     loopback_thread.join(timeout=5)
-    mic_thread.join(timeout=5)
+    transcription_thread.join(timeout=30)  # Allow time to drain remaining chunks
     session.close()
 
     logger.info("Session saved: %s", session.filepath)
