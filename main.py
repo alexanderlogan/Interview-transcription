@@ -14,6 +14,10 @@
 
 import os
 import queue
+import warnings
+warnings.filterwarnings("ignore", message="torchcodec")
+warnings.filterwarnings("ignore", message="Lightning automatically")
+warnings.filterwarnings("ignore", category=UserWarning, module="pyannote")
 import logging
 import sys
 import time

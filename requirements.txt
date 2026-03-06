@@ -1,9 +1,23 @@
-# Audio capture — WASAPI loopback + input device support
-PyAudioWPatch>=0.2.12
+# Interview Transcriber — Python dependencies
+#
+# Install with: pip install -r requirements.txt
+#
+# Note: pyaudiowpatch must be installed separately on Windows:
+#   pip install pyaudiowpatch
+# It is not on PyPI under this name on all platforms.
 
-# Transcription — CPU-optimized Whisper (Phase 2+, included now to lock version)
-faster-whisper>=1.0.0
+# Audio capture
+pyaudiowpatch
+soxr
+soundfile
 
-# Audio processing
-numpy>=1.24.0
-soxr>=0.3.0
+# Transcription
+faster-whisper
+
+# Diarization
+pyannote.audio
+omegaconf
+
+# Utilities
+numpy
+torch
